@@ -1,0 +1,208 @@
+#include "server.h"
+#include "util.h"
+
+void manageClient(int client, struct sockaddr_in addr) { 
+    int shmfd = shm_open("/commanderToManager", O_RDONLY, 0);
+    struct shmpBuf* shmp;
+    if (shmfd == -1) {
+        fprintf(stderr, "Could not create shared memory fd for the manager\n");
+        exit(1);
+    }
+    if ((shmp = mmap(NULL, sizeof(struct shmpBuf), PROT_READ, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
+        fprintf(stderr, "Manager memory map to the shared memory space failed\nError string: %s\n", strerror(errno));
+        exit(1);
+    }
+    size_t lastReqID = 0;
+    while (1) {
+//        char* response = getResponse(client);
+//        if (response) printf("Client %d said: \"%s\"\n", client, response);
+        
+        if (shmp->id > lastReqID) {
+            __sync_synchronize();
+            if (shmp->type == SAY) {
+                printf("Executing SAY command with buffer: \"%s\" to client: %s\n", shmp->buf, inet_ntoa(addr.sin_addr));
+                fflush(stdout);
+                sendResponse(client, shmp->buf);
+            }
+            lastReqID = shmp->id;
+        } 
+        usleep(100000);
+    }
+    munmap(shmp, sizeof(struct shmpBuf));
+}
+
+void manageCommands () {
+    int shmfd = shm_open("/commanderToManager", O_RDWR | O_CREAT, 0600);
+    struct shmpBuf* shmp;
+    if (shmfd == -1) {
+        fprintf(stderr, "Could not create shared memory space for the commander\n");
+        exit(1);
+    }
+    if (ftruncate(shmfd, sizeof(struct shmpBuf)) == -1) {
+        fprintf(stderr, "Could not truncate shared memory space to desired size\n");
+        exit(1);
+    }
+    if ((shmp = mmap(NULL, sizeof(struct shmpBuf), PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
+        fprintf(stderr, "Commander memory map to the shared memory space failed\n");
+        exit(1);
+    }
+    shmp->id = 0;
+    shmp->cnts = 0;
+    char* temp = malloc(1024);
+    char* seg[32];
+    size_t currentSegment = 0;
+    size_t comID = 1;
+    while (1) {
+        //COMMAND PARSER
+        size_t readBytes = 0;
+        bool str = false;
+        size_t bytes = read(STDIN_FILENO, temp, 1024);
+        for (int i = 0; i < bytes; i++) { 
+            if (temp[i] == '"') {
+                str = !str;
+                
+                if (str) {
+                    readBytes++;
+                    continue;
+                } 
+            }
+
+            if ((temp[i] == ' ' || temp[i] == '"' || temp[i] == '\n') && !str && i - readBytes > 0) {
+                if (currentSegment > 32) {
+                    printf("Too many arguments - MAX 32 arguments allowed");
+                    fflush(stdout);
+                    break;
+                }
+                
+                size_t len = i - readBytes;
+                seg[currentSegment] = malloc(len + 1);
+                memcpy(seg[currentSegment], temp + readBytes, len);
+                seg[currentSegment][len] = '\0';
+                
+                readBytes = i + 1; // to not count the ' '
+                currentSegment++;
+            } else if(temp[i] == ' ' && !str && i - readBytes == 0) {
+                readBytes++;
+            }
+        }
+
+        //EXECUTE COMMAND
+        if (strcmp(seg[0], "say") == 0) {
+            shmp->cnts = strlen(seg[1]);
+            strcpy(shmp->buf, seg[1]);
+            shmp->type = SAY;
+            __sync_synchronize(); 
+            
+            shmp->id = comID;
+            comID++;
+        }
+
+        //CLEANUP
+        for (int i = 0; i < currentSegment; i++) {
+            if (seg[i] != NULL) { 
+                free(seg[i]);
+                seg[i] = NULL;
+            }
+            currentSegment = 0;
+        }
+    }
+    free(temp);
+    munmap(shmp, sizeof(struct shmpBuf));
+}
+
+void listenToClients(int serverSocket) {
+    struct sockaddr_in* clientSockAddr = malloc(sizeof(struct sockaddr_in));
+    socklen_t clientSockLen = (socklen_t)sizeof(*clientSockAddr);
+    
+    pid_t commander = fork();
+    if (commander == 0) manageCommands();
+
+    while (1) {
+        int clientSocket = accept(serverSocket, (struct sockaddr*)clientSockAddr, &clientSockLen);
+        //let the parent deal with accepting requests and the child with reading and responding
+        pid_t manager = fork();
+        if (manager == 0) manageClient(clientSocket, *clientSockAddr);
+    }
+    free(clientSockAddr);
+}
+
+void startServer(int port, size_t maxCon) {
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        fprintf(stderr, "Could not start server\nError string: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    struct sockaddr_in* address = malloc(sizeof(struct sockaddr_in));
+    address->sin_family = AF_INET;
+    address->sin_port = htons(port);
+    address->sin_addr.s_addr = htonl(INADDR_ANY); 
+
+    if (bind(sockfd, (const struct sockaddr*)address, (socklen_t)sizeof(*address)) ==  -1) {
+        fprintf(stderr, "Could not bind the server socket\nError string: %s\n", strerror(errno));
+        exit(1);
+    }
+    
+    if (listen(sockfd, maxCon) < 0)  {
+        fprintf(stderr, "Could not start listening\nErrorString: %s\n", strerror(errno));
+        exit(1);
+    }
+
+    printf("Server setup complete\nWaiting for clients\n");
+    listenToClients(sockfd);
+}
+
+int main(int argc, char* argv[]) {
+    int port = 0;
+    size_t maxCon = 128;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--port") == 0 || strcmp(argv[i], "-p") == 0) {  
+            if (++i >= argc) {
+                fprintf(stderr, "Wrong use of port argument (-p or --port)\nNo port specified\n");
+                printf("Defaulting to port 8080\n");
+                continue;
+            }
+            char* endptr;
+            port = strtol(argv[i], &endptr, 10);
+            if (endptr == argv[i]) {
+                fprintf(stderr, "Wrong use of port argument (-p or --port)\nSpecified port is not a number\n");
+                printf("Letting the system choose the port\n");
+                port = 0;
+                continue;
+            } else if (*endptr != '\0') {
+                fprintf(stderr, "Wrong use of port argument (-p or --port)\nInvalid char: %c\n", *endptr);  
+                printf("Letting the system choose the port\n");
+                port = 0;
+                continue;
+            }
+            continue;
+        }
+
+        if (strcmp(argv[i], "--maxPending") == 0 || strcmp(argv[i], "-mp") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Wrong use of maximum pending argument (-mp or --maxPen)\nNo size specified\n");
+                printf("Defaulting maximum pending connections to 128\n");
+                continue;
+            }
+            char* endptr;
+            maxCon = strtol(argv[i], &endptr, 10);
+            if (endptr == argv[i]) {
+                fprintf(stderr, "Wrong use of maximum pending argument (-mp or --maxPen)\nSpecified size is not a number\n");
+                printf("Defaulting to 128\n");
+                maxCon = 128;
+                continue;
+            } else if (*endptr != '\0') {
+                fprintf(stderr, "Wrong use of maximum pending argument (-mp or --maxPen)\nInvalid char: %c\n", *endptr);
+                printf("Defaulting to 128\n");
+                maxCon = 128;
+                continue;
+            }
+            continue;
+        }
+    }
+   
+    printf("Starting server on port: %d\n", port);
+    startServer(port, maxCon);    
+
+    return 0;
+}
