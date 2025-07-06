@@ -14,9 +14,12 @@ void manageClient(int client, struct sockaddr_in addr) {
     }
     size_t lastReqID = 0;
     while (1) {
-//        char* response = getResponse(client);
-//        if (response) printf("Client %d said: \"%s\"\n", client, response);
-        
+        char* response = readFile(client);
+        if (response != NULL) {
+            printf("Client %d said: \"%s\" \n", client, response);
+            free(response);
+        }
+
         if (shmp->id > lastReqID) {
             __sync_synchronize();
             if (shmp->type == SAY) {

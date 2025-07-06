@@ -4,15 +4,17 @@ void sendResponse(int socket, char* str) {
     write(socket, str, strlen(str));
 }
 
-char* getResponse(int socket) {
+char* readFile(int file) {
+    fcntl(file, F_SETFL, fcntl(file, F_GETFL) | O_NONBLOCK);
+
     size_t bufferSize = 1024;
     char* buffer = malloc(bufferSize);
     ssize_t bytes = -1;
     size_t responseSize = 0;
     while (1) {
-        bytes = recv(socket, buffer + responseSize, bufferSize, MSG_DONTWAIT);
+        bytes = read(file, buffer + responseSize, 1024);
         if (bytes > 0) responseSize += bytes;
-        if (responseSize > bufferSize) {
+        if (responseSize + 1024 >= bufferSize) {
             bufferSize *= 2;
             buffer = realloc(buffer, bufferSize);
             if (buffer == NULL) {
@@ -23,7 +25,10 @@ char* getResponse(int socket) {
         }
 
         if (bytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            if (responseSize == 0) return NULL;
+            if (responseSize == 0) {
+                free(buffer);
+                return NULL;
+            }
             buffer = realloc(buffer, responseSize + 1);
             if (buffer == NULL) {
                 fprintf(stderr, "Could not reallocate read buffer\nError string: %s\n", strerror(errno));

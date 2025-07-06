@@ -2,13 +2,16 @@
 #include "util.h"
 
 void listenToServer(int socket) {
-    sendResponse(socket, "Hello");
-
     while (1) {
-        char* response = getResponse(socket);
-        if (response != NULL) {
-            printf("Server said: %s\n", response);
-            free(response);
+        char* serverResponse = readFile(socket);    
+        if (serverResponse != NULL) {
+            printf("Server said: %s\n", serverResponse);
+            free(serverResponse);
+        }
+        char* input = readFile(STDIN_FILENO);
+        if (input != NULL) {
+            sendResponse(socket, input);
+            free(input);
         }
     }
     close(socket);
@@ -27,8 +30,10 @@ void startClient(struct in_addr conAddress, int port) {
 
     if (connect(sockfd, (struct sockaddr*)addr, (socklen_t)sizeof(*addr)) == -1) {
         fprintf(stderr, "Could not connect the socket to specified address\nError string: %s\n", strerror(errno));
+        free(addr);
         exit(1);
     }
+    free(addr);
     listenToServer(sockfd);
 }
 

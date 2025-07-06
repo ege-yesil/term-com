@@ -6,8 +6,10 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 
 void sendResponse(int socket, char* str);
-//use free() to free any char* created with this function 
-char* getResponse(int socket);
+// use free() to free any char* created with this function 
+// a nonblocking way of reading any file descriptor
+char* readFile(int file);
 #endif
