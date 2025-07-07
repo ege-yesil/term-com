@@ -14,9 +14,14 @@ void manageClient(int client, struct sockaddr_in addr) {
     }
     size_t lastReqID = 0;
     while (1) {
+        if (recv(client, NULL, 1, MSG_DONTWAIT | MSG_DONTWAIT) == 0) {
+            printf("Connection with client %s lost. Ending thread\n", inet_ntoa(addr.sin_addr));
+            exit(0);
+        }
+
         char* response = readFile(client);
         if (response != NULL) {
-            printf("Client %d said: \"%s\" \n", client, response);
+            printf("Client %d said: \"%s\" \n", inet_ntoa(addr.sin_addr), response);
             free(response);
         }
 
@@ -24,7 +29,6 @@ void manageClient(int client, struct sockaddr_in addr) {
             __sync_synchronize();
             if (shmp->type == SAY) {
                 printf("Executing SAY command with buffer: \"%s\" to client: %s\n", shmp->buf, inet_ntoa(addr.sin_addr));
-                fflush(stdout);
                 sendResponse(client, shmp->buf);
             }
             lastReqID = shmp->id;

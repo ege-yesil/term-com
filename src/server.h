@@ -9,7 +9,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/mman.h>
-#include <fcntl.h>
 #define BUF_SIZE 1024
 
 enum commandType {
