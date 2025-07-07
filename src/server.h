@@ -9,28 +9,18 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/mman.h>
-#define BUF_SIZE 1024
 
-enum commandType {
-    SAY,
-    KICK 
-};
+#include "commands.h"
 
-// buf is the string buffer data is written into
-// id is the communication buffer id managed by the commander thread
-// each time a buffer is sent its incremented by one
-// it is used for the manager thread to process the buffer
-//
-// cnts is the length of the buffer buf
-// type specifies the type of the command
-struct shmpBuf {
-    char buf[BUF_SIZE];
-    volatile size_t id;
-    size_t cnts;
-    enum commandType type;
-};
+// Reads and parses any input from the stdin
+// Returns a char* array of size parameter segSize
+char** parseCommand(size_t segSize);
 
-void listenToClients(int serverSocket);
+// This function will integrate any working server socket to the term-com pipeline
+// c2mShmpName is the file name which is going to be used for the commander to communicate with manager threads
+// If the server is started via startServer c2mShmpName will be "/commanderToManager"
+void listenToClients(int serverSocket, char* c2mShmpName);
+
 // Starts a TCP server in the specified port with specified settings 
 void startServer(int port, size_t maxCon);
 #endif
