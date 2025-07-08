@@ -1,5 +1,4 @@
 #include "server.h"
-#include "util.h"
 
 void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) { 
     int shmfd = shm_open(c2mShmpName, O_RDONLY, 0);

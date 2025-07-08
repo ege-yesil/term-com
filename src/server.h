@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <sys/mman.h>
 
+#include "util.h"
 #include "commands.h"
 
 // Reads and parses any input from the stdin
