@@ -13,6 +13,10 @@
 #include "util.h"
 #include "commands.h"
 
+// Executes a command given by the commander thread
+// Returns if the command was successful
+bool executeCommand(int client, struct sockaddr_in addr, char* shmpPath, struct shmpBuf* shmp);
+
 // Reads and parses any input from the stdin
 // Returns a char* array of size parameter segSize
 char** parseCommand(size_t segSize);

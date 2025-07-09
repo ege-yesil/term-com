@@ -1,6 +1,40 @@
 #include "server.h"
 
-void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) { 
+bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct shmpBuf* shmp) {
+    printf("Executed %s command on client %s\n", comTypeToString(shmp->type), inet_ntoa(addr.sin_addr));
+    fflush(stdout);
+    switch (shmp->type) {
+        case SAY:
+            sendResponse(client, shmp->buf);
+            break;
+        case KICK:
+            size_t ipSize = 16; // maximum address can be 16 chars
+            char* ip = malloc(ipSize);
+            size_t i = 0;
+            while (shmp->buf[i] != '\r') {
+                ip[i] = shmp->buf[i];
+                i++;
+            }
+            ip[16] = '\0';
+            if (ipSize < strlen(ip)) ip = realloc(ip, strlen(ip));
+            if (strcmp(inet_ntoa(addr.sin_addr), ip) == 0) {
+                sendResponse(client, shmp->buf + i + 1);  // +1 to not send \r
+                close(client);
+                shm_unlink(shmPath);
+                exit(0);
+            }
+            break;
+        case KICKALL:
+            sendResponse(client,  shmp->buf);
+            close(client);
+            shm_unlink(shmPath);
+            exit(0);
+            break;
+    }
+    return true;
+}
+
+static void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) { 
     int shmfd = shm_open(c2mShmpName, O_RDONLY, 0);
     
     struct shmpBuf* shmp;
@@ -24,21 +58,11 @@ void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) {
             printf("Client %s said: \"%s\" \n", inet_ntoa(addr.sin_addr), response);
             free(response);
         }
+        while (shmp->id > lastReqID) {
+            if (executeCommand(client, addr, c2mShmpName, shmp))
+                lastReqID++;
+        }
 
-        if (shmp->id > lastReqID) {
-            __sync_synchronize();
-            if (shmp->type == SAY) {
-                printf("Executing SAY command with buffer: \"%s\" to client: %s\n", shmp->buf, inet_ntoa(addr.sin_addr));
-                sendResponse(client, shmp->buf);
-            }
-            if (shmp->type == KICKALL) {
-                printf("Executing KICK command with buffer: \"%s\" to client: %s\n", shmp->buf, inet_ntoa(addr.sin_addr));
-                sendResponse(client, shmp->buf);
-                close(client);
-                exit(0);
-            }
-            lastReqID = shmp->id;
-        } 
         usleep(100000);
     }
     munmap(shmp, sizeof(struct shmpBuf));
@@ -74,7 +98,7 @@ char** parseCommand(size_t segSize) {
             memcpy(seg[currentSegment], temp + readBytes, len);
             seg[currentSegment][len] = '\0';
             
-            readBytes = i + 1; // to not count the ' '
+            readBytes = i + 1; // +1 to not count the ' '
             currentSegment++;
         } else if(temp[i] == ' ' && !str && i - readBytes == 0) {
             readBytes++;
@@ -84,7 +108,7 @@ char** parseCommand(size_t segSize) {
     return seg;
 }
 
-void manageCommands(char* c2mShmpName) {
+static void manageCommands(char* c2mShmpName) {
     int shmfd = shm_open(c2mShmpName, O_RDWR | O_CREAT, 0600);
     struct shmpBuf* shmp;
     if (shmfd == -1) {
@@ -111,7 +135,7 @@ void manageCommands(char* c2mShmpName) {
         if (strcmp(seg[0], "kick") == 0) {
             exec_kick(shmp, seg[1], seg[2]);
         }
-        if (strcmp(seg[0], "quit") == 0) {
+        if (strcmp(seg[0], "kickall") == 0) {
             exec_kickAll(shmp, seg[1]);
         }
         //CLEANUP

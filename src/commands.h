@@ -1,6 +1,7 @@
 #ifndef COMMANDS_H
 #define COMMANDS_H
 #include <string.h>
+#include <stdio.h>
 
 #define BUF_SIZE 1024
 
@@ -23,6 +24,8 @@ struct shmpBuf {
     size_t cnts;
     enum commandType type;
 };
+
+char* comTypeToString(enum commandType type);
 
 // Exec functions or command functions take a shared memory space and execute the said command.
 // The shared memory space needs to be readable and writable
