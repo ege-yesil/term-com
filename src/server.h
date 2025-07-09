@@ -13,6 +13,8 @@
 #include "util.h"
 #include "commands.h"
 
+#define KICK_MESSAGE "You have been kicked from the server by the owner. Kick message: " 
+
 // Executes a command given by the commander thread
 // Returns if the command was successful
 bool executeCommand(int client, struct sockaddr_in addr, char* shmpPath, struct shmpBuf* shmp);

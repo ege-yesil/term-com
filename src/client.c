@@ -3,20 +3,18 @@
 
 void listenToServer(int socket) {
     while (1) {
-        // socket closed
-        if (recv(socket, NULL, 1, MSG_PEEK | MSG_DONTWAIT) == 0) {
-            printf("Server connection lost. Exiting program\n");
-            exit(0);
-        }
-
         char* serverResponse = readFile(socket);    
         if (serverResponse != NULL) {
+            if (strcmp(serverResponse, FILE_CLOSED) == 0) {
+                printf("Server connection lost. Exiting program\n");
+                exit(0);
+            }
             printf("Server said: %s\n", serverResponse);
             free(serverResponse);
         }
         char* input = readFile(STDIN_FILENO);
         // realloc to get rid of the \n
-        if (input != NULL) {
+        if (input != NULL && strcmp(input, "\n") != 0) {
             size_t inSize = strlen(input);
             input[inSize - 1] = '\0';
             input = realloc(input, inSize - 1);

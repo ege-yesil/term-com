@@ -15,17 +15,25 @@ bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct s
                 ip[i] = shmp->buf[i];
                 i++;
             }
-            ip[16] = '\0';
-            if (ipSize < strlen(ip)) ip = realloc(ip, strlen(ip));
+            ip[i] = '\0';
+            if (ipSize > strlen(ip)) ip = realloc(ip, strlen(ip) + 1); // +1 for null terminator
             if (strcmp(inet_ntoa(addr.sin_addr), ip) == 0) {
-                sendResponse(client, shmp->buf + i + 1);  // +1 to not send \r
+                char*  response = malloc(strlen(KICK_MESSAGE) + strlen(shmp->buf + i));
+                strcpy(response, KICK_MESSAGE);
+                strcpy(response + strlen(KICK_MESSAGE), shmp->buf + i + 1);   
+                
+                sendResponse(client, response);  // +1 to not send \r
                 close(client);
                 shm_unlink(shmPath);
                 exit(0);
             }
             break;
         case KICKALL:
-            sendResponse(client,  shmp->buf);
+            char*  response = malloc(strlen(KICK_MESSAGE) + strlen(shmp->buf));
+            strcpy(response, KICK_MESSAGE);
+            strcpy(response + strlen(KICK_MESSAGE), shmp->buf);   
+            
+            sendResponse(client, response);
             close(client);
             shm_unlink(shmPath);
             exit(0);

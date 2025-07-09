@@ -11,7 +11,7 @@ char* readFile(int file) {
     char* buffer = malloc(bufferSize);
     ssize_t bytes = -1;
     size_t responseSize = 0;
-    while (1) {
+    while (bytes !=  0) {
         bytes = read(file, buffer + responseSize, 1024);
         if (bytes > 0) responseSize += bytes;
         if (responseSize + 1024 >= bufferSize) {
@@ -44,5 +44,7 @@ char* readFile(int file) {
             return NULL;
         }
     }
+    // If program reached here bytes == 0 so file closed
+    return FILE_CLOSED;
 }
 
