@@ -1,42 +1,37 @@
 #include "server.h"
 
-bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct shmpBuf* shmp) {
-    printf("Executed %s command on client %s\n", comTypeToString(shmp->type), inet_ntoa(addr.sin_addr));
+bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct command cmd) {
+    if (cmd.type == NOCMD) return true;
+    printf("Executing %s command on client %s\n", cmdTypeToString(cmd.type), inet_ntoa(addr.sin_addr));
     fflush(stdout);
-    switch (shmp->type) {
+    switch (cmd.type) {
         case SAY:
-            sendResponse(client, shmp->buf);
+            sendResponse(client, cmd.buf);
             break;
         case KICK:
             size_t ipSize = 16; // maximum address can be 16 chars
             char* ip = malloc(ipSize);
             size_t i = 0;
-            while (shmp->buf[i] != '\r') {
-                ip[i] = shmp->buf[i];
+            while (cmd.buf[i] != '\r') {
+                ip[i] = cmd.buf[i];
                 i++;
             }
             ip[i] = '\0';
             if (ipSize > strlen(ip)) ip = realloc(ip, strlen(ip) + 1); // +1 for null terminator
             if (strcmp(inet_ntoa(addr.sin_addr), ip) == 0) {
-                char*  response = malloc(strlen(KICK_MESSAGE) + strlen(shmp->buf + i));
+                char*  response = malloc(strlen(KICK_MESSAGE) + strlen(cmd.buf + i));
                 strcpy(response, KICK_MESSAGE);
-                strcpy(response + strlen(KICK_MESSAGE), shmp->buf + i + 1);   
+                strcpy(response + strlen(KICK_MESSAGE), cmd.buf + i + 1);   
                 
                 sendResponse(client, response);  // +1 to not send \r
-                close(client);
-                shm_unlink(shmPath);
-                exit(0);
             }
             break;
         case KICKALL:
-            char*  response = malloc(strlen(KICK_MESSAGE) + strlen(shmp->buf));
+            char*  response = malloc(strlen(KICK_MESSAGE) + strlen(cmd.buf));
             strcpy(response, KICK_MESSAGE);
-            strcpy(response + strlen(KICK_MESSAGE), shmp->buf);   
+            strcpy(response + strlen(KICK_MESSAGE), cmd.buf);   
             
             sendResponse(client, response);
-            close(client);
-            shm_unlink(shmPath);
-            exit(0);
             break;
     }
     return true;
@@ -45,35 +40,43 @@ bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct s
 static void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) { 
     int shmfd = shm_open(c2mShmpName, O_RDONLY, 0);
     
-    struct shmpBuf* shmp;
+    struct commandShm* shmp;
     if (shmfd == -1) {
         fprintf(stderr, "Could not create shared memory fd for the manager\n");
         exit(1);
     }
-    if ((shmp = mmap(NULL, sizeof(struct shmpBuf), PROT_READ, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
+    if ((shmp = mmap(NULL, sizeof(struct commandShm), PROT_READ, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
         fprintf(stderr, "Manager memory map to the shared memory space failed\nError string: %s\n", strerror(errno));
         exit(1);
     }
-    size_t lastReqID = 0;
+    size_t lastCmdID = shmp->newestCommand;
     while (1) {
-        if (recv(client, NULL, 1, MSG_DONTWAIT | MSG_DONTWAIT) == 0) {
-            printf("Connection with client %s lost. Ending thread\n", inet_ntoa(addr.sin_addr));
-            exit(0);
-        }
-
         char* response = readFile(client);
         if (response != NULL) {
+            if (strcmp(response, FILE_CLOSED) == 0) {
+                printf("Connection with client %s lost. Ending thread\n", inet_ntoa(addr.sin_addr));
+                munmap(shmp, sizeof(struct commandShm));
+                exit(0);
+            }
             printf("Client %s said: \"%s\" \n", inet_ntoa(addr.sin_addr), response);
             free(response);
         }
-        while (shmp->id > lastReqID) {
-            if (executeCommand(client, addr, c2mShmpName, shmp))
-                lastReqID++;
+        
+        if (shmp->newestCommand == 0) lastCmdID = 0;
+        if (lastCmdID < shmp->newestCommand) {
+            bool cmdSuccess = executeCommand(client, addr, c2mShmpName, shmp->commands[shmp->newestCommand]);
+            enum commandType type = shmp->commands[shmp->newestCommand].type;
+            if (type == KICK || type == KICKALL) {
+                munmap(shmp, sizeof(struct commandShm));
+                close(client);
+                exit(0);
+            }
+            lastCmdID++;
         }
 
         usleep(100000);
     }
-    munmap(shmp, sizeof(struct shmpBuf));
+    munmap(shmp, sizeof(struct commandShm));
 }
 
 char** parseCommand(size_t segSize) {
@@ -118,25 +121,28 @@ char** parseCommand(size_t segSize) {
 
 static void manageCommands(char* c2mShmpName) {
     int shmfd = shm_open(c2mShmpName, O_RDWR | O_CREAT, 0600);
-    struct shmpBuf* shmp;
+    struct commandShm* shmp;
     if (shmfd == -1) {
         fprintf(stderr, "Could not create shared memory space for the commander\n");
         exit(1);
     }
-    if (ftruncate(shmfd, sizeof(struct shmpBuf)) == -1) {
+    if (ftruncate(shmfd, sizeof(struct commandShm)) == -1) {
         fprintf(stderr, "Could not truncate shared memory space to desired size\n");
         exit(1);
     }
-    if ((shmp = mmap(NULL, sizeof(struct shmpBuf), PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
+    if ((shmp = mmap(NULL, sizeof(struct commandShm), PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
         fprintf(stderr, "Commander memory map to the shared memory space failed\n");
         exit(1);
     }
-    shmp->id = 0;
-    shmp->cnts = 0;
-    
+   
+    resetCommandShm(shmp); 
     size_t comID = 1; 
     while (1) {
+        if (shmp->newestCommand >= MAX_CMD_SIZE - 1)
+            resetCommandShm(shmp);
+        
         char** seg = parseCommand(32);
+
         if (strcmp(seg[0], "say") == 0) {
             exec_say(shmp, seg[1]);
         }
@@ -154,7 +160,7 @@ static void manageCommands(char* c2mShmpName) {
             }
         }
     }
-    munmap(shmp, sizeof(struct shmpBuf));
+    munmap(shmp, sizeof(struct commandShm));
 }
 
 void listenToClients(int serverSocket, char* c2mShmpName) {

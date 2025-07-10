@@ -4,8 +4,11 @@
 #include <stdio.h>
 
 #define BUF_SIZE 1024
+#define MAX_CMD_SIZE 128  // this just effects the global command history
+                          // after it fills up the program starts again from 0
 
 enum commandType {
+    NOCMD,
     SAY,
     KICK, 
     KICKALL
@@ -18,20 +21,26 @@ enum commandType {
 //
 // cnts is the length of the buffer buf
 // type specifies the type of the command
-struct shmpBuf {
+struct command {
     char buf[BUF_SIZE];
-    volatile size_t id;
     size_t cnts;
     enum commandType type;
 };
 
-char* comTypeToString(enum commandType type);
+struct commandShm {
+    struct command commands[MAX_CMD_SIZE];
+    volatile size_t newestCommand;
+};
+
+void resetCommandShm(struct commandShm* shmp);
+
+char* cmdTypeToString(enum commandType type);
 
 // Exec functions or command functions take a shared memory space and execute the said command.
 // The shared memory space needs to be readable and writable
 // The shared memory space needs to be the one used by the commander thread to communicate with the manager threads. 
-void exec_say(struct shmpBuf* shmp, char* str);
-void exec_kick(struct shmpBuf* shmp, char* who,char* str);
-void exec_kickAll(struct shmpBuf* shmp, char* str);
+void exec_say(struct commandShm* cmd, char* str);
+void exec_kick(struct commandShm* cmd, char* who,char* str);
+void exec_kickAll(struct commandShm* cmd, char* str);
 
 #endif

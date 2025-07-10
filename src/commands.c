@@ -1,6 +1,16 @@
 #include "commands.h"
 
-char* comTypeToString(enum commandType type) {
+void resetCommandShm(struct commandShm* shmp) {
+    shmp->newestCommand = 0;
+    for (size_t i = 0; i < MAX_CMD_SIZE; i++) {
+        shmp->commands[i].cnts = 0;
+        shmp->commands[i].type = NOCMD;
+        *shmp->commands[i].buf = '\0';
+    }
+    __sync_synchronize();
+}
+
+char* cmdTypeToString(enum commandType type) {
     switch(type) {
         case SAY:
             return "SAY";
@@ -13,37 +23,40 @@ char* comTypeToString(enum commandType type) {
     }
 }
 
-void exec_say(struct shmpBuf* shmp, char* str) {
-    shmp->cnts = strlen(str);
-    shmp->type = SAY;
-    strcpy(shmp->buf, str);
-    shmp->id++;
+void exec_say(struct commandShm* shmp, char* str) {
+    shmp->newestCommand++;
+    shmp->commands[shmp->newestCommand].cnts = strlen(str);
+    shmp->commands[shmp->newestCommand].type = SAY;
+    strcpy(shmp->commands[shmp->newestCommand].buf, str);
+    
     __sync_synchronize();
 }
 
-
-void exec_kick(struct shmpBuf* shmp, char* who, char* str) {
+void exec_kick(struct commandShm* shmp, char* who, char* str) {
+    shmp->newestCommand++;
     size_t whoSize = strlen(who);
     size_t strSize = strlen(str);
-    shmp->cnts = whoSize + strSize; 
-    if (shmp->cnts > BUF_SIZE) {
-        shmp->cnts = 0;
+    shmp->commands[shmp->newestCommand].cnts = whoSize + strSize; 
+    if (shmp->commands[shmp->newestCommand].cnts > BUF_SIZE) {
+        shmp->commands[shmp->newestCommand].cnts = 0;
+        shmp->newestCommand--;
         printf("Too big kick string. Couldnt execute command");
         return;
     }
-    shmp->type = KICK;
-    strcpy(shmp->buf, who);
-    shmp->buf[whoSize] = '\r';
-    strcpy(shmp->buf + whoSize + 1, str);
-    shmp->id++;
+    shmp->commands[shmp->newestCommand].type = KICK;
+    strcpy(shmp->commands[shmp->newestCommand].buf, who);
+    shmp->commands[shmp->newestCommand].buf[whoSize] = '\r';
+    strcpy(shmp->commands[shmp->newestCommand].buf + whoSize + 1, str);
+    
     __sync_synchronize();
 }
 
 
-void exec_kickAll(struct shmpBuf* shmp, char* str) {
-    shmp->cnts = strlen(str);
-    shmp->type = KICKALL;
-    strcpy(shmp->buf, str);
-    shmp->id++;
+void exec_kickAll(struct commandShm* shmp, char* str) {
+    shmp->newestCommand++;
+    shmp->commands[shmp->newestCommand].cnts = strlen(str);
+    shmp->commands[shmp->newestCommand].type = KICKALL;
+    strcpy(shmp->commands[shmp->newestCommand].buf, str);
+    
     __sync_synchronize();
 }
