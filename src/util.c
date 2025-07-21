@@ -1,6 +1,25 @@
 #include "util.h"
 
-void sendResponse(int socket, char* str) {
+void* createSharedMem(const char* path, int shmFlags, int mmapFlags, size_t size) {
+    int shmfd = shm_open(path, shmFlags, 0600);
+    if (shmfd == -1) { 
+        fprintf(stderr, "Could not create shared memory space\n");
+        return NULL;
+    }
+    if (shmFlags & O_RDWR && ftruncate(shmfd, size) == -1) {
+        fprintf(stderr, "Could not truncate shared memory space to desired size\n");
+        return NULL; 
+    }
+    void* shmp = malloc(size);
+    if ((shmp = mmap(NULL, size, mmapFlags, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
+        fprintf(stderr, "Memory map to the shared memory space failed");
+        free(shmp); 
+        return NULL;
+    }
+    return shmp;
+}
+
+void sendResponse(int socket, const char* str) {
     write(socket, str, strlen(str));
 }
 

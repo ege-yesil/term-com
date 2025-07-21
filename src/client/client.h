@@ -9,6 +9,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include "util.h"
+
 void listenToServer(int socket);
 void startClient(struct in_addr conAddress, int port);
 #endif

@@ -1,5 +1,4 @@
 #include "client.h"
-#include "util.h"
 
 void listenToServer(int socket) {
     while (1) {

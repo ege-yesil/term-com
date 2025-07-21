@@ -1,6 +1,12 @@
 #include "server.h"
 
-bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct command cmd) {
+void changeServerResponseFn(size_t handlerIndex) {
+    size_t* shmp = createSharedMem("/responseFptr", O_RDWR | O_CREAT, PROT_WRITE | PROT_READ, sizeof(size_t));
+    *shmp = handlerIndex;
+    munmap(shmp, sizeof(int*));
+}
+
+bool executeCommand(int client, struct sockaddr_in addr, struct command cmd) {
     if (cmd.type == NOCMD) return true;
     printf("Executing %s command on client %s\n", cmdTypeToString(cmd.type), inet_ntoa(addr.sin_addr));
     fflush(stdout);
@@ -37,37 +43,32 @@ bool executeCommand(int client, struct sockaddr_in addr, char* shmPath, struct c
     return true;
 }
 
-static void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName) { 
-    int shmfd = shm_open(c2mShmpName, O_RDONLY, 0);
-    
-    struct commandShm* shmp;
-    if (shmfd == -1) {
-        fprintf(stderr, "Could not create shared memory fd for the manager\n");
-        exit(1);
-    }
-    if ((shmp = mmap(NULL, sizeof(struct commandShm), PROT_READ, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
-        fprintf(stderr, "Manager memory map to the shared memory space failed\nError string: %s\n", strerror(errno));
-        exit(1);
-    }
-    size_t lastCmdID = shmp->newestCommand;
+static void manageClient(int client, struct sockaddr_in addr) { 
+    struct commandShm* cmdShmp = createSharedMem("/commanderToManager", O_RDONLY, PROT_READ, sizeof(struct commandShm));
+    size_t* responseIndex = createSharedMem("/responseFptr", O_RDONLY, PROT_READ, sizeof(size_t)); 
+   
+    size_t lastCmdID = cmdShmp->newestCommand;
     while (1) {
-        char* response = readFile(client);
+        const char* response = readFile(client);
         if (response != NULL) {
             if (strcmp(response, FILE_CLOSED) == 0) {
                 printf("Connection with client %s lost. Ending thread\n", inet_ntoa(addr.sin_addr));
-                munmap(shmp, sizeof(struct commandShm));
+                munmap(cmdShmp, sizeof(struct commandShm));
                 exit(0);
             }
+            handlers[*responseIndex](client, response); 
+
             printf("Client %s said: \"%s\" \n", inet_ntoa(addr.sin_addr), response);
-            free(response);
+            free((char*)response);
         }
         
-        if (shmp->newestCommand == 0) lastCmdID = 0;
-        if (lastCmdID < shmp->newestCommand) {
-            bool cmdSuccess = executeCommand(client, addr, c2mShmpName, shmp->commands[shmp->newestCommand]);
-            enum commandType type = shmp->commands[shmp->newestCommand].type;
+        if (cmdShmp->newestCommand == 0) lastCmdID = 0;
+        if (lastCmdID < cmdShmp->newestCommand) {
+            bool cmdSuccess = executeCommand(client, addr, cmdShmp->commands[cmdShmp->newestCommand]);
+            enum commandType type = cmdShmp->commands[cmdShmp->newestCommand].type;
             if (type == KICK || type == KICKALL) {
-                munmap(shmp, sizeof(struct commandShm));
+                munmap(cmdShmp, sizeof(struct commandShm));
+                shutdown(client, SHUT_RDWR);
                 close(client);
                 exit(0);
             }
@@ -76,65 +77,12 @@ static void manageClient(int client, struct sockaddr_in addr, char* c2mShmpName)
 
         usleep(100000);
     }
-    munmap(shmp, sizeof(struct commandShm));
+    munmap(cmdShmp, sizeof(struct commandShm));
 }
 
-char** parseCommand(size_t segSize) {
-    char* temp = malloc(1024);
-    char** seg = malloc(sizeof(char*) * segSize);
-    size_t currentSegment = 0;
-    size_t readBytes = 0;
+static void manageCommands() {
+    struct commandShm* shmp = createSharedMem("/commanderToManager", O_RDWR | O_CREAT, PROT_READ | PROT_WRITE, sizeof(struct commandShm));
     
-    bool str = false;
-    size_t bytes = read(STDIN_FILENO, temp, 1024);
-    for (int i = 0; i < bytes; i++) { 
-        if (temp[i] == '"') {
-            str = !str;
-            
-            if (str) {
-                readBytes++;
-                continue;
-            } 
-        }
-
-        if ((temp[i] == ' ' || temp[i] == '"' || temp[i] == '\n') && !str && i - readBytes > 0) {
-            if (currentSegment > segSize) {
-                printf("Too many arguments - MAX %d arguments allowed", segSize);
-                fflush(stdout);
-                break;
-            }
-            
-            size_t len = i - readBytes;
-            seg[currentSegment] = malloc(len + 1);
-            memcpy(seg[currentSegment], temp + readBytes, len);
-            seg[currentSegment][len] = '\0';
-            
-            readBytes = i + 1; // +1 to not count the ' '
-            currentSegment++;
-        } else if(temp[i] == ' ' && !str && i - readBytes == 0) {
-            readBytes++;
-        }
-    }
-    free(temp);
-    return seg;
-}
-
-static void manageCommands(char* c2mShmpName) {
-    int shmfd = shm_open(c2mShmpName, O_RDWR | O_CREAT, 0600);
-    struct commandShm* shmp;
-    if (shmfd == -1) {
-        fprintf(stderr, "Could not create shared memory space for the commander\n");
-        exit(1);
-    }
-    if (ftruncate(shmfd, sizeof(struct commandShm)) == -1) {
-        fprintf(stderr, "Could not truncate shared memory space to desired size\n");
-        exit(1);
-    }
-    if ((shmp = mmap(NULL, sizeof(struct commandShm), PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0)) == MAP_FAILED) {
-        fprintf(stderr, "Commander memory map to the shared memory space failed\n");
-        exit(1);
-    }
-   
     resetCommandShm(shmp); 
     size_t comID = 1; 
     while (1) {
@@ -163,20 +111,20 @@ static void manageCommands(char* c2mShmpName) {
     munmap(shmp, sizeof(struct commandShm));
 }
 
-void listenToClients(int serverSocket, char* c2mShmpName) {
+void listenToClients(int serverSocket) {
     struct sockaddr_in* clientSockAddr = malloc(sizeof(struct sockaddr_in));
     socklen_t clientSockLen = (socklen_t)sizeof(*clientSockAddr);
-    
+     
     pid_t commander = fork();
-    if (commander == 0) manageCommands(c2mShmpName);
+    if (commander == 0) manageCommands();
 
+    changeServerResponseFn(1); // all response functions are defined in the serverModes.c
     while (1) {
         int clientSocket = accept(serverSocket, (struct sockaddr*)clientSockAddr, &clientSockLen);
         //let the parent deal with accepting requests and the child with reading and responding
         pid_t manager = fork();
-        if (manager == 0) manageClient(clientSocket, *clientSockAddr, c2mShmpName);
+        if (manager == 0) manageClient(clientSocket, *clientSockAddr);
     }
-    free(c2mShmpName);
     free(clientSockAddr);
 }
 
@@ -203,7 +151,7 @@ void startServer(int port, size_t maxCon) {
     }
 
     printf("Server setup complete\nWaiting for clients\n");
-    listenToClients(sockfd, "/commanderToManager");
+    listenToClients(sockfd); 
 }
 
 int main(int argc, char* argv[]) {

@@ -2,6 +2,8 @@
 #define COMMANDS_H
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #define BUF_SIZE 1024
 #define MAX_CMD_SIZE 128  // this just effects the global command history
@@ -35,6 +37,10 @@ struct commandShm {
 void resetCommandShm(struct commandShm* shmp);
 
 char* cmdTypeToString(enum commandType type);
+
+// Reads and parses any input from the stdin
+// Returns a char* array of size parameter segSize
+char** parseCommand(size_t segSize);
 
 // Exec functions or command functions take a shared memory space and execute the said command.
 // The shared memory space needs to be readable and writable
