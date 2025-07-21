@@ -2,8 +2,8 @@ CC = gcc
 SRC = src
 BIN = bin
 
-SERVER := $(addprefix $(SRC)/, server.c util.c commands.c)
-CLIENT := $(addprefix $(SRC)/, client.c util.c)
+SERVER := src/server/server.c src/server/serverModes.c src/util.c src/commands.c
+CLIENT := src/client/client.c src/util.c
 
 all: server client
 
