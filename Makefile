@@ -3,7 +3,7 @@ SRC = src
 BIN = bin
 
 SERVER := src/server/server.c src/server/serverModes.c src/util.c src/commands.c
-CLIENT := src/client/client.c src/util.c
+CLIENT := src/client/client.c src/util.c src/commands.c
 
 all: server client
 

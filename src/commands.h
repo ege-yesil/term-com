@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define BUF_SIZE 1024
 #define MAX_CMD_SIZE 128  // this just effects the global command history
@@ -24,17 +25,18 @@ enum commandType {
 // cnts is the length of the buffer buf
 // type specifies the type of the command
 struct command {
-    char buf[BUF_SIZE];
+    char* buf[BUF_SIZE];
     size_t cnts;
     enum commandType type;
 };
 
-struct commandShm {
+struct commandMem {
     struct command commands[MAX_CMD_SIZE];
-    volatile size_t newestCommand;
+    size_t newestCommand;
+    pthread_mutex_t lock;
 };
 
-void resetCommandShm(struct commandShm* shmp);
+void resetCommandMem(struct commandMem* cmd);
 
 char* cmdTypeToString(enum commandType type);
 
@@ -45,8 +47,8 @@ char** parseCommand(size_t segSize);
 // Exec functions or command functions take a shared memory space and execute the said command.
 // The shared memory space needs to be readable and writable
 // The shared memory space needs to be the one used by the commander thread to communicate with the manager threads. 
-void exec_say(struct commandShm* cmd, char* str);
-void exec_kick(struct commandShm* cmd, char* who,char* str);
-void exec_kickAll(struct commandShm* cmd, char* str);
+void exec_say(struct commandMem* cmd, char* str);
+void exec_kick(struct commandMem* cmd, char* who,char* str);
+void exec_kickAll(struct commandMem* cmd, char* str);
 
 #endif

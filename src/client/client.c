@@ -11,20 +11,27 @@ void listenToServer(int socket) {
             printf("Server said: %s\n", serverResponse);
             free(serverResponse);
         }
-        char* input = readFile(STDIN_FILENO);
-        // realloc to get rid of the \n
-        if (input != NULL && strcmp(input, "\n") != 0) {
-            size_t inSize = strlen(input);
-            input[inSize - 1] = '\0';
-            input = realloc(input, inSize - 1);
-            if (strcmp(input, "/quit") == 0) {
+        char* firstChar;
+        recv(STDIN_FILENO, firstChar, 1, MSG_DONTWAIT | MSG_PEEK);
+        if (*firstChar == '/') {
+            char** input = parseCommand(2048);
+      
+            if (strcmp(input[0], "/quit") == 0) {
                 close(socket);
                 free(input);
                 exit(0);
             }
-            sendResponse(socket, input);
-            free(input);
+        } else {
+            char* input = readFile(STDIN_FILENO);
+            if (input != NULL) {
+                size_t inSize = strlen(input) - 2; // -1 to delete \n and -1 to  make the first index 0 instead of 1 
+                input = realloc(input, inSize); 
+                input[inSize] = '\0';
+                sendResponse(socket, input);
+                free(input);
+            }
         }
+
     }
     close(socket);
 }

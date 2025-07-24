@@ -1,13 +1,14 @@
 #include "commands.h"
 
-void resetCommandShm(struct commandShm* shmp) {
-    shmp->newestCommand = 0;
+void resetCommandMem(struct commandMem* cmd) {
+    pthread_mutex_lock(&cmd->lock);
+    cmd->newestCommand = 0;
     for (size_t i = 0; i < MAX_CMD_SIZE; i++) {
-        shmp->commands[i].cnts = 0;
-        shmp->commands[i].type = NOCMD;
-        *shmp->commands[i].buf = '\0';
+        cmd->commands[i].cnts = 0;
+        cmd->commands[i].type = NOCMD;
+        *cmd->commands[i].buf = '\0';
     }
-    __sync_synchronize();
+    pthread_mutex_unlock(&cmd->lock);
 }
 
 char* cmdTypeToString(enum commandType type) {
@@ -25,7 +26,7 @@ char* cmdTypeToString(enum commandType type) {
 
 char** parseCommand(size_t segSize) {
     char* temp = malloc(1024);
-    char** seg = malloc(sizeof(char*) * segSize);
+    char** seg = calloc(segSize, sizeof(char));
     size_t currentSegment = 0;
     size_t readBytes = 0;
     
@@ -63,43 +64,45 @@ char** parseCommand(size_t segSize) {
     return seg;
 }
 
-void exec_say(struct commandShm* shmp, char* str) {
+void exec_say(struct commandMem* cmd, char* str) {
     if (str == NULL) return;
-    shmp->newestCommand++;
-    shmp->commands[shmp->newestCommand].cnts = strlen(str);
-    shmp->commands[shmp->newestCommand].type = SAY;
-    strcpy(shmp->commands[shmp->newestCommand].buf, str);
     
-    __sync_synchronize();
+    pthread_mutex_lock(&cmd->lock);
+    cmd->newestCommand++;
+    cmd->commands[cmd->newestCommand].cnts = strlen(str);
+    cmd->commands[cmd->newestCommand].type = SAY;
+    strcpy(*cmd->commands[cmd->newestCommand].buf, str);
+    pthread_mutex_unlock(&cmd->lock);    
 }
 
-void exec_kick(struct commandShm* shmp, char* who, char* str) {
+void exec_kick(struct commandMem* cmd, char* who, char* str) {
     if (str == NULL) return;
-    shmp->newestCommand++;
+    pthread_mutex_lock(&cmd->lock);
+    cmd->newestCommand++;
     size_t whoSize = strlen(who);
     size_t strSize = strlen(str);
-    shmp->commands[shmp->newestCommand].cnts = whoSize + strSize; 
-    if (shmp->commands[shmp->newestCommand].cnts > BUF_SIZE) {
-        shmp->commands[shmp->newestCommand].cnts = 0;
-        shmp->newestCommand--;
+    cmd->commands[cmd->newestCommand].cnts = whoSize + strSize; 
+    if (cmd->commands[cmd->newestCommand].cnts > BUF_SIZE) {
+        cmd->commands[cmd->newestCommand].cnts = 0;
+        cmd->newestCommand--;
         printf("Too big kick string. Couldnt execute command");
         return;
     }
-    shmp->commands[shmp->newestCommand].type = KICK;
-    strcpy(shmp->commands[shmp->newestCommand].buf, who);
-    shmp->commands[shmp->newestCommand].buf[whoSize] = '\r';
-    strcpy(shmp->commands[shmp->newestCommand].buf + whoSize + 1, str);
-    
-    __sync_synchronize();
+    cmd->commands[cmd->newestCommand].type = KICK;
+    strcpy(*cmd->commands[cmd->newestCommand].buf, who);
+    *cmd->commands[cmd->newestCommand].buf[whoSize] = '\r';
+    strcpy(*cmd->commands[cmd->newestCommand].buf + whoSize + 1, str);
+    pthread_mutex_unlock(&cmd->lock);
 }
 
 
-void exec_kickAll(struct commandShm* shmp, char* str) {
+void exec_kickAll(struct commandMem* cmd, char* str) {
     if (str == NULL) return; 
-    shmp->newestCommand++;
-    shmp->commands[shmp->newestCommand].cnts = strlen(str);
-    shmp->commands[shmp->newestCommand].type = KICKALL;
-    strcpy(shmp->commands[shmp->newestCommand].buf, str);
     
-    __sync_synchronize();
+    pthread_mutex_lock(&cmd->lock);
+    cmd->newestCommand++;
+    cmd->commands[cmd->newestCommand].cnts = strlen(str);
+    cmd->commands[cmd->newestCommand].type = KICKALL;
+    strcpy(*cmd->commands[cmd->newestCommand].buf, str);
+    pthread_mutex_unlock(&cmd->lock);    
 }

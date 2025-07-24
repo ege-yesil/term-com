@@ -9,7 +9,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "util.h"
+#include "../util.h"
+#include "../commands.h"
 
 void listenToServer(int socket);
 void startClient(struct in_addr conAddress, int port);
